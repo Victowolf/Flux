@@ -1,0 +1,70 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flux-server
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: flux-server
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: flux-container
+          image: python:3.11-slim
+          workingDir: /workspace
+          env:
+            - name: MODEL_ID
+              value: black-forest-labs/FLUX.1-schnell
+            - name: OMP_NUM_THREADS
+              value: "20"
+            - name: MKL_NUM_THREADS
+              value: "20"
+            # Optional: create a Kubernetes Secret named hf-token with key token
+            # if Hugging Face requires authentication for model access.
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+                  optional: true
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends git
+              rm -rf /var/lib/apt/lists/*
+              cd /workspace
+              git clone https://github.com/Victowolf/Flux project
+              cd project
+              pip install --no-cache-dir -r requirements.txt
+              exec uvicorn main:app --host 0.0.0.0 --port 8000
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: "20"
+              memory: "32Gi"
+            limits:
+              cpu: "20"
+              memory: "32Gi"
+          # CPU-only: intentionally no NVIDIA GPU/MIG resource request.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flux-service
+spec:
+  type: NodePort
+  selector:
+    app: flux-server
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      nodePort: 30128
